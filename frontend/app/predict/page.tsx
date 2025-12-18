@@ -1,13 +1,11 @@
 // app/predict/page.tsx
-import React from "react";
-//import BreastCancerPredictor from "../components/BreastCancerPredictor";
+import BreastCancerPredictor from '../components/BreastCancerPredictor';
+import OncologistLayout from '../layouts/OncologistLayout';
 
-const PredictPage = () => {
+export default function PredictPage() {
   return (
-    <div>
-      {/*<BreastCancerPredictor />*/}
-    </div>
+    <OncologistLayout>
+      <BreastCancerPredictor />
+    </OncologistLayout>
   );
-};
-
-export default PredictPage;
+}

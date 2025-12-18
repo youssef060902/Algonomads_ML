@@ -1,55 +1,18 @@
 "use client";
 import React, { useState } from 'react';
-import { Upload, AlertCircle, CheckCircle, XCircle, FileText, Loader2, ClipboardList, Target, TrendingUp, Scale, Activity, BarChart3, Stethoscope, Shield } from 'lucide-react';
+import { Upload, FileText, AlertCircle, CheckCircle, XCircle, Loader2, Target, TrendingUp, Scale, Activity, BarChart3, Stethoscope, Shield } from 'lucide-react';
 
-// Type definitions
-interface PredictionResult {
-  prediction: 'Benign' | 'Malignant';
-  probability_malignant: number;
-}
-
-interface ProcessedSample {
-  features: number[];
-  result?: PredictionResult;
-  error?: string;
-}
-
-interface FeatureValues {
-  // Mean features
-  radius_mean: number;
-  texture_mean: number;
-  perimeter_mean: number;
-  area_mean: number;
-  smoothness_mean: number;
-  compactness_mean: number;
-  concavity_mean: number;
-  concave_points_mean: number;
-  symmetry_mean: number;
-  fractal_dimension_mean: number;
-  
-  // SE features
-  radius_se: number;
-  texture_se: number;
-  perimeter_se: number;
-  area_se: number;
-  smoothness_se: number;
-  compactness_se: number;
-  concavity_se: number;
-  concave_points_se: number;
-  symmetry_se: number;
-  fractal_dimension_se: number;
-  
-  // Worst features
-  radius_worst: number;
-  texture_worst: number;
-  perimeter_worst: number;
-  area_worst: number;
-  smoothness_worst: number;
-  compactness_worst: number;
-  concavity_worst: number;
-  concave_points_worst: number;
-  symmetry_worst: number;
-  fractal_dimension_worst: number;
+// Type definitions matching backend contract
+interface StagePredictionResult {
+  predicted_stage: string;
+  stage_code: number;
+  probabilities: {
+    "Benign (0)": number;
+    "Stage I": number;
+    "Stage II": number;
+    "Stage III": number;
+    "Stage IV": number;
+  };
 }
 
 interface FeatureGroup {
@@ -68,105 +31,167 @@ interface FeatureGroup {
   }[];
 }
 
-const BreastCancerPredictor = () => {
+interface FeatureValues {
+  // Size & Geometry Group
+  radius_mean: number;
+  perimeter_mean: number;
+  area_mean: number;
+  radius_worst: number;
+  perimeter_worst: number;
+  area_worst: number;
+  
+  // Texture & Density Group
+  texture_mean: number;
+  smoothness_mean: number;
+  texture_worst: number;
+  smoothness_worst: number;
+  fractal_dimension_mean: number;
+  fractal_dimension_worst: number;
+  
+  // Shape Irregularity Group
+  compactness_mean: number;
+  concavity_mean: number;
+  concave_points_mean: number;
+  compactness_worst: number;
+  concavity_worst: number;
+  concave_points_worst: number;
+  
+  // Aggressiveness Indicators Group
+  symmetry_mean: number;
+  radius_se: number;
+  perimeter_se: number;
+  area_se: number;
+  symmetry_worst: number;
+  
+  // Standard Error Group
+  texture_se: number;
+  smoothness_se: number;
+  compactness_se: number;
+  concavity_se: number;
+  concave_points_se: number;
+  symmetry_se: number;
+  fractal_dimension_se: number;
+}
+
+const TumorStagePredictor = () => {
   // Feature state - initialized with median values from WBCD dataset
   const [features, setFeatures] = useState<FeatureValues>({
-    // Mean features
+    // Size & Geometry
     radius_mean: 12.0,
-    texture_mean: 18.0,
     perimeter_mean: 80.0,
     area_mean: 500.0,
+    radius_worst: 14.0,
+    perimeter_worst: 90.0,
+    area_worst: 600.0,
+    
+    // Texture & Density
+    texture_mean: 18.0,
     smoothness_mean: 0.1,
+    texture_worst: 22.0,
+    smoothness_worst: 0.12,
+    fractal_dimension_mean: 0.06,
+    fractal_dimension_worst: 0.07,
+    
+    // Shape Irregularity
     compactness_mean: 0.08,
     concavity_mean: 0.05,
     concave_points_mean: 0.02,
-    symmetry_mean: 0.17,
-    fractal_dimension_mean: 0.06,
+    compactness_worst: 0.12,
+    concavity_worst: 0.08,
+    concave_points_worst: 0.04,
     
-    // SE features
+    // Aggressiveness Indicators
+    symmetry_mean: 0.17,
     radius_se: 0.3,
-    texture_se: 1.0,
     perimeter_se: 1.5,
     area_se: 25.0,
+    symmetry_worst: 0.2,
+    
+    // Standard Error
+    texture_se: 1.0,
     smoothness_se: 0.003,
     compactness_se: 0.015,
     concavity_se: 0.01,
     concave_points_se: 0.005,
     symmetry_se: 0.02,
     fractal_dimension_se: 0.002,
-    
-    // Worst features
-    radius_worst: 14.0,
-    texture_worst: 22.0,
-    perimeter_worst: 90.0,
-    area_worst: 600.0,
-    smoothness_worst: 0.12,
-    compactness_worst: 0.12,
-    concavity_worst: 0.08,
-    concave_points_worst: 0.04,
-    symmetry_worst: 0.2,
-    fractal_dimension_worst: 0.07,
   });
 
-  const [prediction, setPrediction] = useState<PredictionResult | null>(null);
+  const [prediction, setPrediction] = useState<StagePredictionResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeGroup, setActiveGroup] = useState<string>('mean');
+  const [activeGroup, setActiveGroup] = useState<string>('size');
 
   // CSV Upload State
   const [file, setFile] = useState<File | null>(null);
-  const [uploadResults, setUploadResults] = useState<PredictionResult[]>([]);
+  const [uploadResults, setUploadResults] = useState<StagePredictionResult[]>([]);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  // Define feature groups with biological domains - ALL 30 FEATURES
+  // Define feature groups with biological domains
   const featureGroups: FeatureGroup[] = [
     {
-      id: 'mean',
-      name: 'Mean Characteristics',
-      description: 'Average tumor cellular features',
-      icon: <Target className="w-5 h-5" />,
+      id: 'size',
+      name: 'Size & Geometry',
+      description: 'Tumor dimensions and spatial characteristics',
+      icon: <Scale className="w-5 h-5" />,
       features: [
         { id: 'radius_mean', label: 'Radius (Mean)', description: 'Average distance from center', min: 6, max: 28, step: 0.1, defaultValue: 12.0 },
-        { id: 'texture_mean', label: 'Texture (Mean)', description: 'Gray-scale variation', min: 9, max: 40, step: 0.1, defaultValue: 18.0 },
-        { id: 'perimeter_mean', label: 'Perimeter (Mean)', description: 'Boundary length', min: 40, max: 150, step: 1, defaultValue: 80.0 },
-        { id: 'area_mean', label: 'Area (Mean)', description: 'Cross-sectional area', min: 100, max: 2500, step: 10, defaultValue: 500.0 },
-        { id: 'smoothness_mean', label: 'Smoothness (Mean)', description: 'Local radius variation', min: 0.05, max: 0.2, step: 0.001, defaultValue: 0.1 },
-        { id: 'compactness_mean', label: 'Compactness (Mean)', description: '(perimeter²/area) - 1.0', min: 0.02, max: 0.3, step: 0.001, defaultValue: 0.08 },
-        { id: 'concavity_mean', label: 'Concavity (Mean)', description: 'Severity of concave portions', min: 0.0, max: 0.4, step: 0.001, defaultValue: 0.05 },
-        { id: 'concave_points_mean', label: 'Concave Points (Mean)', description: 'Number of concave portions', min: 0.0, max: 0.2, step: 0.001, defaultValue: 0.02 },
-        { id: 'symmetry_mean', label: 'Symmetry (Mean)', description: 'Bilateral symmetry', min: 0.1, max: 0.3, step: 0.001, defaultValue: 0.17 },
-        { id: 'fractal_dimension_mean', label: 'Fractal Dim. (Mean)', description: 'Boundary complexity', min: 0.04, max: 0.1, step: 0.001, defaultValue: 0.06 },
+        { id: 'perimeter_mean', label: 'Perimeter (Mean)', description: 'Average boundary length', min: 40, max: 150, step: 1, defaultValue: 80.0 },
+        { id: 'area_mean', label: 'Area (Mean)', description: 'Average cross-sectional area', min: 100, max: 2500, step: 10, defaultValue: 500.0 },
+        { id: 'radius_worst', label: 'Radius (Worst)', description: 'Maximum radius observed', min: 8, max: 35, step: 0.1, defaultValue: 14.0 },
+        { id: 'perimeter_worst', label: 'Perimeter (Worst)', description: 'Maximum perimeter', min: 50, max: 200, step: 1, defaultValue: 90.0 },
+        { id: 'area_worst', label: 'Area (Worst)', description: 'Maximum area', min: 200, max: 5000, step: 10, defaultValue: 600.0 },
       ]
     },
     {
-      id: 'worst',
-      name: 'Worst Features',
-      description: 'Maximum observed characteristics',
-      icon: <TrendingUp className="w-5 h-5" />,
+      id: 'texture',
+      name: 'Texture & Density',
+      description: 'Cellular texture and structural complexity',
+      icon: <Target className="w-5 h-5" />,
       features: [
-        { id: 'radius_worst', label: 'Radius (Worst)', description: 'Maximum radius', min: 8, max: 35, step: 0.1, defaultValue: 14.0 },
-        { id: 'texture_worst', label: 'Texture (Worst)', description: 'Maximum texture', min: 12, max: 50, step: 0.1, defaultValue: 22.0 },
-        { id: 'perimeter_worst', label: 'Perimeter (Worst)', description: 'Maximum perimeter', min: 50, max: 200, step: 1, defaultValue: 90.0 },
-        { id: 'area_worst', label: 'Area (Worst)', description: 'Maximum area', min: 200, max: 5000, step: 10, defaultValue: 600.0 },
+        { id: 'texture_mean', label: 'Texture (Mean)', description: 'Average gray-scale variation', min: 9, max: 40, step: 0.1, defaultValue: 18.0 },
+        { id: 'smoothness_mean', label: 'Smoothness (Mean)', description: 'Local radius variation', min: 0.05, max: 0.2, step: 0.001, defaultValue: 0.1 },
+        { id: 'texture_worst', label: 'Texture (Worst)', description: 'Maximum texture irregularity', min: 12, max: 50, step: 0.1, defaultValue: 22.0 },
         { id: 'smoothness_worst', label: 'Smoothness (Worst)', description: 'Maximum roughness', min: 0.06, max: 0.25, step: 0.001, defaultValue: 0.12 },
+        { id: 'fractal_dimension_mean', label: 'Fractal Dim. (Mean)', description: 'Average boundary complexity', min: 0.04, max: 0.1, step: 0.001, defaultValue: 0.06 },
+        { id: 'fractal_dimension_worst', label: 'Fractal Dim. (Worst)', description: 'Maximum boundary complexity', min: 0.05, max: 0.15, step: 0.001, defaultValue: 0.07 },
+      ]
+    },
+    {
+      id: 'shape',
+      name: 'Shape Irregularity',
+      description: 'Contour abnormalities and morphological features',
+      icon: <Activity className="w-5 h-5" />,
+      features: [
+        { id: 'compactness_mean', label: 'Compactness (Mean)', description: 'Average compactness score', min: 0.02, max: 0.3, step: 0.001, defaultValue: 0.08 },
+        { id: 'concavity_mean', label: 'Concavity (Mean)', description: 'Average contour concavity', min: 0.0, max: 0.4, step: 0.001, defaultValue: 0.05 },
+        { id: 'concave_points_mean', label: 'Concave Points (Mean)', description: 'Average concave portions', min: 0.0, max: 0.2, step: 0.001, defaultValue: 0.02 },
         { id: 'compactness_worst', label: 'Compactness (Worst)', description: 'Maximum compactness', min: 0.03, max: 0.5, step: 0.001, defaultValue: 0.12 },
         { id: 'concavity_worst', label: 'Concavity (Worst)', description: 'Maximum concavity', min: 0.0, max: 0.6, step: 0.001, defaultValue: 0.08 },
         { id: 'concave_points_worst', label: 'Concave Points (Worst)', description: 'Maximum concave points', min: 0.0, max: 0.3, step: 0.001, defaultValue: 0.04 },
-        { id: 'symmetry_worst', label: 'Symmetry (Worst)', description: 'Minimum symmetry', min: 0.15, max: 0.5, step: 0.001, defaultValue: 0.2 },
-        { id: 'fractal_dimension_worst', label: 'Fractal Dim. (Worst)', description: 'Maximum fractal dimension', min: 0.05, max: 0.15, step: 0.001, defaultValue: 0.07 },
+      ]
+    },
+    {
+      id: 'aggression',
+      name: 'Aggressiveness',
+      description: 'Indicators of invasive potential and progression',
+      icon: <TrendingUp className="w-5 h-5" />,
+      features: [
+        { id: 'symmetry_mean', label: 'Symmetry (Mean)', description: 'Average bilateral symmetry', min: 0.1, max: 0.3, step: 0.001, defaultValue: 0.17 },
+        { id: 'radius_se', label: 'Radius SE', description: 'Radius standard error', min: 0.1, max: 2.0, step: 0.01, defaultValue: 0.3 },
+        { id: 'perimeter_se', label: 'Perimeter SE', description: 'Perimeter standard error', min: 0.5, max: 8.0, step: 0.1, defaultValue: 1.5 },
+        { id: 'area_se', label: 'Area SE', description: 'Area standard error', min: 5, max: 200, step: 1, defaultValue: 25.0 },
+        { id: 'symmetry_worst', label: 'Symmetry (Worst)', description: 'Minimum symmetry observed', min: 0.15, max: 0.5, step: 0.001, defaultValue: 0.2 },
       ]
     },
     {
       id: 'errors',
-      name: 'Standard Errors',
-      description: 'Measurement variability and consistency',
+      name: 'Measurement Variability',
+      description: 'Standard errors and measurement consistency',
       icon: <BarChart3 className="w-5 h-5" />,
       features: [
-        { id: 'radius_se', label: 'Radius SE', description: 'Radius standard error', min: 0.1, max: 2.0, step: 0.01, defaultValue: 0.3 },
         { id: 'texture_se', label: 'Texture SE', description: 'Texture standard error', min: 0.3, max: 5.0, step: 0.01, defaultValue: 1.0 },
-        { id: 'perimeter_se', label: 'Perimeter SE', description: 'Perimeter standard error', min: 0.5, max: 8.0, step: 0.1, defaultValue: 1.5 },
-        { id: 'area_se', label: 'Area SE', description: 'Area standard error', min: 5, max: 200, step: 1, defaultValue: 25.0 },
         { id: 'smoothness_se', label: 'Smoothness SE', description: 'Smoothness standard error', min: 0.001, max: 0.02, step: 0.0001, defaultValue: 0.003 },
         { id: 'compactness_se', label: 'Compactness SE', description: 'Compactness standard error', min: 0.002, max: 0.1, step: 0.0001, defaultValue: 0.015 },
         { id: 'concavity_se', label: 'Concavity SE', description: 'Concavity standard error', min: 0.0, max: 0.15, step: 0.0001, defaultValue: 0.01 },
@@ -177,8 +202,10 @@ const BreastCancerPredictor = () => {
     }
   ];
 
-  // Convert features to the 30-element array in correct order
+  // Convert features to the 30-element array in correct order (matches questionnaire order)
   const featuresToArray = (): number[] => {
+    // This order must match the backend's expected feature order
+    // Using the same order as the original questionnaire for consistency
     return [
       // Mean features (1-10)
       features.radius_mean,
@@ -232,7 +259,7 @@ const BreastCancerPredictor = () => {
     try {
       const featureArray = featuresToArray();
       
-      const response = await fetch('http://localhost:8000/predict', {
+      const response = await fetch('http://localhost:8000/predict_stage', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -244,7 +271,7 @@ const BreastCancerPredictor = () => {
         throw new Error(`Prediction failed: ${response.statusText}`);
       }
 
-      const result: PredictionResult = await response.json();
+      const result: StagePredictionResult = await response.json();
       setPrediction(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to get prediction');
@@ -255,19 +282,27 @@ const BreastCancerPredictor = () => {
 
   // CSV Upload Functions
   const parseCSV = (text: string): number[][] => {
+    // Normalize and split lines
     const normalized = text.replace(/\r/g, '');
     const rawLines = normalized.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     const data: number[][] = [];
     if (rawLines.length === 0) return data;
 
+    // Detect delimiter (comma vs semicolon)
     const firstLine = rawLines[0];
     const commaCount = firstLine.split(',').length;
     const semicolonCount = firstLine.split(';').length;
     const delim = semicolonCount > commaCount ? ';' : ',';
 
+    // Split respecting quoted fields
     const splitRegex = new RegExp(`${delim}(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)`);
-    const rows = rawLines.map(line => line.split(splitRegex).map(f => f.replace(/^\"|\"$/g, '').trim()));
 
+    // Remove outer quotes if entire line is wrapped
+    const processedLines = rawLines.map(line => (line.startsWith('"') && line.endsWith('"')) ? line.slice(1, -1) : line);
+
+    const rows = processedLines.map(line => line.split(splitRegex).map(f => f.replace(/^\"|\"$/g, '').trim()));
+
+    // Check if first row is header
     const numsInFirst = rows[0].map(f => parseFloat(f)).filter(n => !isNaN(n)).length;
     const isHeader = numsInFirst < rows[0].length / 2;
     const startIndex = isHeader ? 1 : 0;
@@ -282,6 +317,7 @@ const BreastCancerPredictor = () => {
       if (numericValues.length >= 30) data.push(numericValues.slice(0, 30));
     }
 
+    // Fallback: try stripping quotes and splitting by comma
     if (data.length === 0) {
       const cleaned = text.replace(/['"\uFEFF]/g, '');
       const lines = cleaned.replace(/\r/g, '').split('\n').map(l => l.trim()).filter(l => l.length > 0);
@@ -326,10 +362,11 @@ const BreastCancerPredictor = () => {
         throw new Error('No valid samples found. Ensure CSV has 30 numeric features per row.');
       }
 
-      const results: PredictionResult[] = [];
+      const results: StagePredictionResult[] = [];
       
+      // Process each sample sequentially
       for (const features of samples) {
-        const response = await fetch('http://localhost:8000/predict', {
+        const response = await fetch('http://localhost:8000/predict_stage', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -341,12 +378,13 @@ const BreastCancerPredictor = () => {
           throw new Error(`API error: ${response.statusText}`);
         }
 
-        const result: PredictionResult = await response.json();
+        const result: StagePredictionResult = await response.json();
         results.push(result);
       }
 
       setUploadResults(results);
       
+      // If only one sample, also update the main prediction display
       if (results.length === 1) {
         setPrediction(results[0]);
       }
@@ -368,75 +406,31 @@ const BreastCancerPredictor = () => {
   };
 
   // Preset configurations
-  const applyPreset = (preset: 'benign' | 'moderate' | 'malignant' | 'reset') => {
+  const applyPreset = (preset: 'small' | 'moderate' | 'advanced' | 'aggressive') => {
     const presets = {
-      benign: {
+      small: {
         radius_mean: 10.0,
         area_mean: 300.0,
         compactness_mean: 0.05,
         concavity_mean: 0.02,
-        texture_mean: 15.0,
-        symmetry_mean: 0.15,
-        radius_worst: 12.0,
-        area_worst: 400.0,
-        compactness_worst: 0.08,
-        concavity_worst: 0.03,
       },
       moderate: {
         radius_mean: 14.0,
         area_mean: 700.0,
         compactness_mean: 0.12,
         concavity_mean: 0.08,
-        texture_mean: 20.0,
-        symmetry_mean: 0.18,
-        radius_worst: 16.0,
-        area_worst: 900.0,
-        compactness_worst: 0.15,
-        concavity_worst: 0.1,
       },
-      malignant: {
-        radius_mean: 20.0,
-        area_mean: 1500.0,
-        compactness_mean: 0.25,
-        concavity_mean: 0.2,
-        texture_mean: 30.0,
-        symmetry_mean: 0.25,
-        radius_worst: 25.0,
-        area_worst: 2500.0,
-        compactness_worst: 0.3,
-        concavity_worst: 0.25,
+      advanced: {
+        radius_mean: 18.0,
+        area_mean: 1200.0,
+        compactness_mean: 0.2,
+        concavity_mean: 0.15,
       },
-      reset: {
-        radius_mean: 12.0,
-        texture_mean: 18.0,
-        perimeter_mean: 80.0,
-        area_mean: 500.0,
-        smoothness_mean: 0.1,
-        compactness_mean: 0.08,
-        concavity_mean: 0.05,
-        concave_points_mean: 0.02,
-        symmetry_mean: 0.17,
-        fractal_dimension_mean: 0.06,
-        radius_se: 0.3,
-        texture_se: 1.0,
-        perimeter_se: 1.5,
-        area_se: 25.0,
-        smoothness_se: 0.003,
-        compactness_se: 0.015,
-        concavity_se: 0.01,
-        concave_points_se: 0.005,
-        symmetry_se: 0.02,
-        fractal_dimension_se: 0.002,
-        radius_worst: 14.0,
-        texture_worst: 22.0,
-        perimeter_worst: 90.0,
-        area_worst: 600.0,
-        smoothness_worst: 0.12,
-        compactness_worst: 0.12,
-        concavity_worst: 0.08,
-        concave_points_worst: 0.04,
-        symmetry_worst: 0.2,
-        fractal_dimension_worst: 0.07,
+      aggressive: {
+        radius_mean: 22.0,
+        area_mean: 2000.0,
+        compactness_mean: 0.28,
+        concavity_mean: 0.25,
       }
     };
 
@@ -452,13 +446,13 @@ const BreastCancerPredictor = () => {
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-3">
-            Cancer prediction
+            Tumor Stage Prediction System
           </h1>
           <p className="text-lg font-bold text-gray-600 mb-2">
             ENA HEALTHY 
           </p>
           <p className="text-sm text-gray-500 max-w-3xl mx-auto">
-            Advanced machine learning analysis for breast cancer classification using Fine Needle Aspiration (FNA) cytology data
+            Adjust tumor characteristics below to simulate progression and predict clinical staging based on FNA cytology data
           </p>
         </div>
 
@@ -467,11 +461,10 @@ const BreastCancerPredictor = () => {
           <div className="flex items-start">
             <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 mr-3 flex-shrink-0" />
             <div>
-              <h3 className="text-sm font-semibold text-amber-800 mb-1">Medical Disclaimer</h3>
+              <h3 className="text-sm font-semibold text-amber-800 mb-1">Clinical Advisory</h3>
               <p className="text-sm text-amber-700">
-                This tool is designed to support clinical decision-making and should NOT be used as the sole basis 
-                for diagnosis. All predictions must be verified by qualified medical professionals through proper 
-                clinical examination and histopathological analysis.
+                This tool provides staging predictions for educational and research purposes. 
+                All clinical decisions must be validated through comprehensive histopathological analysis.
               </p>
             </div>
           </div>
@@ -488,32 +481,32 @@ const BreastCancerPredictor = () => {
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <button
-                  onClick={() => applyPreset('benign')}
+                  onClick={() => applyPreset('small')}
                   className="p-4 rounded-lg border-2 border-green-200 bg-green-50 hover:bg-green-100 transition-colors text-left"
                 >
-                  <div className="font-semibold text-green-700">Benign Profile</div>
-                  <div className="text-sm text-green-600 mt-1">Small, regular features</div>
+                  <div className="font-semibold text-green-700">Early Detection</div>
+                  <div className="text-sm text-green-600 mt-1">Small, well-defined tumor</div>
                 </button>
                 <button
                   onClick={() => applyPreset('moderate')}
                   className="p-4 rounded-lg border-2 border-yellow-200 bg-yellow-50 hover:bg-yellow-100 transition-colors text-left"
                 >
-                  <div className="font-semibold text-yellow-700">Intermediate</div>
-                  <div className="text-sm text-yellow-600 mt-1">Moderate characteristics</div>
+                  <div className="font-semibold text-yellow-700">Localized</div>
+                  <div className="text-sm text-yellow-600 mt-1">Moderate progression</div>
                 </button>
                 <button
-                  onClick={() => applyPreset('malignant')}
+                  onClick={() => applyPreset('advanced')}
+                  className="p-4 rounded-lg border-2 border-orange-200 bg-orange-50 hover:bg-orange-100 transition-colors text-left"
+                >
+                  <div className="font-semibold text-orange-700">Advanced</div>
+                  <div className="text-sm text-orange-600 mt-1">Regional involvement</div>
+                </button>
+                <button
+                  onClick={() => applyPreset('aggressive')}
                   className="p-4 rounded-lg border-2 border-red-200 bg-red-50 hover:bg-red-100 transition-colors text-left"
                 >
-                  <div className="font-semibold text-red-700">Malignant</div>
-                  <div className="text-sm text-red-600 mt-1">High-risk features</div>
-                </button>
-                <button
-                  onClick={() => applyPreset('reset')}
-                  className="p-4 rounded-lg border-2 border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
-                >
-                  <div className="font-semibold text-gray-700">Reset</div>
-                  <div className="text-sm text-gray-600 mt-1">Clear all values</div>
+                  <div className="font-semibold text-red-700">Aggressive</div>
+                  <div className="text-sm text-red-600 mt-1">High invasive potential</div>
                 </button>
               </div>
             </div>
@@ -522,7 +515,7 @@ const BreastCancerPredictor = () => {
             <div className="bg-white rounded-xl shadow-md p-6">
               <div className="flex items-center mb-6">
                 <Activity className="w-5 h-5 text-indigo-600 mr-2" />
-                <h2 className="text-xl font-semibold text-gray-800">Cytological Characteristics</h2>
+                <h2 className="text-xl font-semibold text-gray-800">Tumor Characteristics</h2>
               </div>
               
               <div className="flex flex-wrap gap-2 mb-6">
@@ -563,7 +556,7 @@ const BreastCancerPredictor = () => {
                           {feature.label}
                         </label>
                         <span className="text-sm font-semibold text-indigo-600">
-                          {features[feature.id].toFixed(feature.step < 0.01 ? 3 : feature.step < 0.1 ? 2 : 1)}
+                          {features[feature.id].toFixed(feature.step < 0.01 ? 3 : 1)}
                         </span>
                       </div>
                       <input
@@ -576,9 +569,9 @@ const BreastCancerPredictor = () => {
                         className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
                       />
                       <div className="flex justify-between text-xs text-gray-500">
-                        <span>{feature.min}</span>
+                        <span>Low</span>
                         <span className="text-center">{feature.description}</span>
-                        <span>{feature.max}</span>
+                        <span>High</span>
                       </div>
                     </div>
                   ))}
@@ -587,7 +580,7 @@ const BreastCancerPredictor = () => {
             </div>
           </div>
 
-          {/* Right Panel: Prediction & Results */}
+          {/* Right Panel: Staging Visualization */}
           <div className="space-y-6">
             {/* Predict Button */}
             <div className="bg-white rounded-xl shadow-md p-6">
@@ -599,12 +592,12 @@ const BreastCancerPredictor = () => {
                 {loading ? (
                   <>
                     <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                    Analyzing Cytological Features...
+                    Analyzing Tumor Progression...
                   </>
                 ) : (
                   <>
                     <Activity className="w-5 h-5 mr-2" />
-                    Predict Diagnosis
+                    Predict Tumor Stage
                   </>
                 )}
               </button>
@@ -665,50 +658,51 @@ const BreastCancerPredictor = () => {
               )}
             </div>
 
-            {/* Diagnosis Ladder */}
+            {/* Staging Ladder */}
             <div className="bg-white rounded-xl shadow-md p-6">
               <div className="flex items-center mb-6">
                 <TrendingUp className="w-5 h-5 text-indigo-600 mr-2" />
-                <h2 className="text-xl font-semibold text-gray-800">Diagnosis Classification</h2>
+                <h2 className="text-xl font-semibold text-gray-800">Tumor Progression</h2>
               </div>
 
               <div className="space-y-1">
                 {[
-                  { label: 'Benign', color: 'bg-green-100', text: 'text-green-800', border: 'border-green-300' },
-                  { label: 'Malignant', color: 'bg-red-100', text: 'text-red-800', border: 'border-red-300' },
-                ].map((diagnosis, index) => (
+                  { label: 'Benign (0)', color: 'bg-green-100', text: 'text-green-800', border: 'border-green-300' },
+                  { label: 'Stage I', color: 'bg-blue-100', text: 'text-blue-800', border: 'border-blue-300' },
+                  { label: 'Stage II', color: 'bg-yellow-100', text: 'text-yellow-800', border: 'border-yellow-300' },
+                  { label: 'Stage III', color: 'bg-orange-100', text: 'text-orange-800', border: 'border-orange-300' },
+                  { label: 'Stage IV', color: 'bg-red-100', text: 'text-red-800', border: 'border-red-300' },
+                ].map((stage, index) => (
                   <div
-                    key={diagnosis.label}
-                    className={`p-4 rounded-lg border-2 ${diagnosis.border} ${diagnosis.color} transition-all duration-300 ${
-                      prediction?.prediction === diagnosis.label ? 'scale-105 shadow-lg' : ''
+                    key={stage.label}
+                    className={`p-4 rounded-lg border-2 ${stage.border} ${stage.color} transition-all duration-300 ${
+                      prediction?.predicted_stage === stage.label ? 'scale-105 shadow-lg' : ''
                     }`}
                   >
                     <div className="flex justify-between items-center">
                       <div className="flex items-center">
-                        <div className={`w-8 h-8 rounded-full ${diagnosis.color} border-2 ${diagnosis.border} flex items-center justify-center mr-3`}>
-                          <span className={`text-sm font-bold ${diagnosis.text}`}>
-                            {index + 1}
+                        <div className={`w-8 h-8 rounded-full ${stage.color} border-2 ${stage.border} flex items-center justify-center mr-3`}>
+                          <span className={`text-sm font-bold ${stage.text}`}>
+                            {index}
                           </span>
                         </div>
-                        <span className={`font-semibold ${diagnosis.text}`}>
-                          {diagnosis.label}
+                        <span className={`font-semibold ${stage.text}`}>
+                          {stage.label}
                         </span>
                       </div>
                       {prediction && (
-                        <span className={`font-bold ${diagnosis.text}`}>
-                          {prediction.prediction === diagnosis.label ? 
-                            `${(diagnosis.label === 'Malignant' ? prediction.probability_malignant * 100 : (1 - prediction.probability_malignant) * 100).toFixed(1)}%` 
-                            : ''}
+                        <span className={`font-bold ${stage.text}`}>
+                          {(prediction.probabilities[stage.label as keyof typeof prediction.probabilities] * 100).toFixed(1)}%
                         </span>
                       )}
                     </div>
-                    {prediction?.prediction === diagnosis.label && (
+                    {prediction && (
                       <div className="mt-2">
                         <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
                           <div
-                            className={`h-full ${diagnosis.color.replace('100', '500')} transition-all duration-500`}
+                            className={`h-full ${stage.color.replace('100', '500')} transition-all duration-500`}
                             style={{ 
-                              width: `${diagnosis.label === 'Malignant' ? prediction.probability_malignant * 100 : (1 - prediction.probability_malignant) * 100}%` 
+                              width: `${prediction.probabilities[stage.label as keyof typeof prediction.probabilities] * 100}%` 
                             }}
                           />
                         </div>
@@ -723,35 +717,36 @@ const BreastCancerPredictor = () => {
             {prediction && (
               <div className="bg-gradient-to-br from-gray-50 to-blue-50 border-2 border-indigo-200 rounded-xl shadow-lg p-6">
                 <h3 className="text-2xl font-bold text-gray-900 mb-6 text-center">
-                  Diagnosis Result
+                  Staging Result
                 </h3>
 
                 {/* Primary Result */}
                 <div className="text-center mb-8">
                   <div className={`text-5xl font-bold mb-2 ${
-                    prediction.prediction === 'Benign' ? 'text-green-600' : 'text-red-600'
+                    prediction.stage_code === 0 ? 'text-green-600' :
+                    prediction.stage_code === 1 ? 'text-blue-600' :
+                    prediction.stage_code === 2 ? 'text-yellow-600' :
+                    prediction.stage_code === 3 ? 'text-orange-600' : 'text-red-600'
                   }`}>
-                    {prediction.prediction}
+                    {prediction.predicted_stage}
                   </div>
                   <div className="text-lg text-gray-600">
-                    Classification Result
+                    Predicted Clinical Stage
                   </div>
                 </div>
 
                 {/* Confidence */}
                 <div className="mb-6">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-gray-700">Malignancy Probability</span>
+                    <span className="text-sm font-medium text-gray-700">Model Confidence</span>
                     <span className="text-sm font-semibold text-indigo-600">
-                      {(prediction.probability_malignant * 100).toFixed(1)}%
+                      {getConfidenceLevel(Math.max(...Object.values(prediction.probabilities)))}
                     </span>
                   </div>
                   <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
                     <div
-                      className={`h-full transition-all duration-500 ${
-                        prediction.probability_malignant > 0.5 ? 'bg-red-500' : 'bg-green-500'
-                      }`}
-                      style={{ width: `${prediction.probability_malignant * 100}%` }}
+                      className="h-full bg-gradient-to-r from-green-500 via-yellow-500 to-red-500"
+                      style={{ width: `${Math.max(...Object.values(prediction.probabilities)) * 100}%` }}
                     />
                   </div>
                 </div>
@@ -763,14 +758,19 @@ const BreastCancerPredictor = () => {
                     <div>
                       <h4 className="font-semibold text-gray-800 mb-2">Clinical Interpretation</h4>
                       <p className="text-sm text-gray-600">
-                        {prediction.prediction === 'Benign' ? 
-                          "Findings consistent with benign characteristics. Continue routine monitoring and follow-up protocols." :
-                          "Malignant features detected. Immediate histopathological confirmation and treatment planning recommended."
+                        {prediction.stage_code === 0 ? 
+                          "Findings consistent with benign characteristics. Continue routine monitoring." :
+                        prediction.stage_code === 1 ?
+                          "Early-stage disease suggested. Consider localized treatment options." :
+                        prediction.stage_code === 2 ?
+                          "Moderate progression indicated. Regional treatment and systemic therapy recommended." :
+                        prediction.stage_code === 3 ?
+                          "Advanced regional involvement. Aggressive multimodal therapy required." :
+                          "Metastatic disease probable. Comprehensive systemic treatment and palliative care indicated."
                         }
                       </p>
                       <div className="mt-3 text-xs text-gray-500">
-                        Model Confidence: {getConfidenceLevel(prediction.probability_malignant)} • 
-                        {(Math.abs(prediction.probability_malignant - 0.5) * 200).toFixed(1)}% certainty
+                        Recommendation: Further histopathological validation required.
                       </div>
                     </div>
                   </div>
@@ -789,23 +789,26 @@ const BreastCancerPredictor = () => {
                 </div>
 
                 {/* Stats Summary */}
-                <div className="grid grid-cols-3 gap-2 mb-4">
-                  <div className="p-2 rounded-lg text-center bg-blue-50">
-                    <div className="text-lg font-bold text-blue-600">{uploadResults.length}</div>
-                    <div className="text-xs text-blue-700">Total</div>
-                  </div>
-                  <div className="p-2 rounded-lg text-center bg-green-50">
-                    <div className="text-lg font-bold text-green-600">
-                      {uploadResults.filter(r => r.prediction === 'Benign').length}
-                    </div>
-                    <div className="text-xs text-green-700">Benign</div>
-                  </div>
-                  <div className="p-2 rounded-lg text-center bg-red-50">
-                    <div className="text-lg font-bold text-red-600">
-                      {uploadResults.filter(r => r.prediction === 'Malignant').length}
-                    </div>
-                    <div className="text-xs text-red-700">Malignant</div>
-                  </div>
+                <div className="grid grid-cols-5 gap-2 mb-4">
+                  {Object.entries(uploadResults.reduce((acc, result) => {
+                    acc[result.predicted_stage] = (acc[result.predicted_stage] || 0) + 1;
+                    return acc;
+                  }, {} as Record<string, number>)).map(([stage, count]) => {
+                    const colorMap: Record<string, string> = {
+                      'Benign (0)': 'bg-green-100 text-green-800',
+                      'Stage I': 'bg-blue-100 text-blue-800',
+                      'Stage II': 'bg-yellow-100 text-yellow-800',
+                      'Stage III': 'bg-orange-100 text-orange-800',
+                      'Stage IV': 'bg-red-100 text-red-800',
+                    };
+                    
+                    return (
+                      <div key={stage} className={`p-2 rounded-lg text-center ${colorMap[stage] || 'bg-gray-100 text-gray-800'}`}>
+                        <div className="text-lg font-bold">{count}</div>
+                        <div className="text-xs">{stage.replace(' (0)', '')}</div>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 {/* Individual Results - Collapsible */}
@@ -817,23 +820,23 @@ const BreastCancerPredictor = () => {
                     {uploadResults.map((result, index) => (
                       <div
                         key={index}
-                        className={`p-3 border rounded-lg ${
-                          result.prediction === 'Benign' 
-                            ? 'border-green-300 bg-green-50' 
-                            : 'border-red-300 bg-red-50'
-                        }`}
+                        className="p-3 border border-gray-200 rounded-lg hover:bg-gray-50"
                       >
                         <div className="flex justify-between items-center">
                           <div className="font-medium">Sample {index + 1}</div>
                           <div className={`font-bold ${
-                            result.prediction === 'Benign' ? 'text-green-600' : 'text-red-600'
+                            result.stage_code === 0 ? 'text-green-600' :
+                            result.stage_code === 1 ? 'text-blue-600' :
+                            result.stage_code === 2 ? 'text-yellow-600' :
+                            result.stage_code === 3 ? 'text-orange-600' : 'text-red-600'
                           }`}>
-                            {result.prediction}
+                            {result.predicted_stage}
                           </div>
                         </div>
                         <div className="text-xs text-gray-600 mt-1">
-                          Probability: {(result.probability_malignant * 100).toFixed(1)}% • 
-                          Confidence: {getConfidenceLevel(result.probability_malignant)}
+                          Confidence: {getConfidenceLevel(Math.max(...Object.values(result.probabilities)))}
+                          {' • '}
+                          Max probability: {(Math.max(...Object.values(result.probabilities)) * 100).toFixed(1)}%
                         </div>
                       </div>
                     ))}
@@ -853,12 +856,12 @@ const BreastCancerPredictor = () => {
 
         {/* Footer */}
         <div className="mt-8 text-center text-sm text-gray-500">
-          <p>Developed for academic and research purposes</p>
-          <p className="mt-1">Based on Wisconsin Breast Cancer Database (WBCD)</p>
+          <p>Tumor Stage Prediction System • Based on AJCC Cancer Staging System</p>
+          <p className="mt-1">For educational and research purposes only</p>
         </div>
       </div>
     </div>
   );
 };
 
-export default BreastCancerPredictor;
+export default TumorStagePredictor;
